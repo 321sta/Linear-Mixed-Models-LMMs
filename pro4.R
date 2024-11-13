@@ -26,9 +26,39 @@ LMMsetup <- function(form, dat, ref) {
     Z_block <- model.matrix(as.formula(paste("~", paste(block, collapse = ":"), "- 1")), data = dat)
     Z <- cbind(Z, Z_block) # Combine blocks into Z
   }
-  t2 <- length(unique(dat$Worker)) # Number of unique workers
-  t3 <- length(unique(dat$Machine)) * length(unique(dat$Worker)) # Interaction count
-  return(list(X = X, Z = Z, t2 = t2, t3 = t3)) # Return setup
+  t <- calculate_counts(ref,dat)
+  return(list(X = X, Z = Z, t=t)) # Return setup
+}
+
+
+calculate_counts <- function(ref, dat) {
+  # Purpose:
+  # Calculate the number of unique values for single or multiple columns defined in `ref`.
+  # If `ref` contains a single column, count the unique values in that column.
+  # If `ref` contains multiple columns, calculate the product of unique counts for those columns.
+  
+  # Input:
+  # ref: A list where each element is either a single column name (as a string) 
+  #      or a vector of multiple column names.
+  # dat: A data frame containing the columns specified in `ref`.
+  
+  # Output:
+  # A numeric vector where each element corresponds to the calculated count
+  # for the respective element in `ref`.
+  
+  # Apply the calculation to each element of `ref`
+  counts <- sapply(ref, function(I) {
+    # If the element of `ref` (I) has only one column name
+    if (length(I) == 1) {
+      # Calculate the number of unique values in the corresponding column of `dat`
+      return(length(unique(dat[[I]])))
+    } else {
+      # Calculate the product of unique values across all specified columns
+      return(prod(sapply(I, function(x) length(unique(dat[[x]])))))
+    }
+  })
+  # Return the resulting counts
+  return(counts)
 }
 
 
@@ -42,8 +72,7 @@ LMMprof <- function(theta, setup, y) {
   #   - A list containing the negative log-likelihood and fixed effect estimates.
   X <- setup$X
   Z <- setup$Z
-  t2 <- setup$t2
-  t3 <- setup$t3
+  t <- setup$t
   
   # QR decomposition of Z
   QR_decomp <- qr(Z)
@@ -53,8 +82,7 @@ LMMprof <- function(theta, setup, y) {
   
   # Variance components
   sigma <- exp(theta[1]) # Residual variance
-  psi_diag <- c(rep(exp(theta[2]^2), t2), rep(exp(theta[3])^2, t3)) # Random effect variances
-  
+  psi_diag <- unlist(lapply(2:length(theta), function(i) {rep(exp(theta[i])^2, t[i - 1])})) # Random effect variances
   # Construct covariance matrix
   A <- R %*% diag(psi_diag) %*% t(R) + diag(sigma^2, p)
   U <- chol(A) # Cholesky decomposition of A
@@ -95,7 +123,7 @@ lmm <- function(form, dat, ref = list()) {
   #   - A list containing the fixed effect estimates, variance estimates, and negative log-likelihood.
   setup <- LMMsetup(form, dat, ref) # Prepare model matrices
   y <- model.response(model.frame(form, data = dat)) # Extract response variable
-  init_theta <- rep(1, 3) # Initial parameter values
+  init_theta <- rep(1, 1+length(ref)) # Initial parameter values
   lower_bounds <- rep(-10, length(init_theta)) # Lower bounds for optimization
   upper_bounds <- rep(10, length(init_theta)) # Upper bounds for optimization
   
@@ -112,3 +140,6 @@ lmm <- function(form, dat, ref = list()) {
   final_results <- LMMprof(final_theta, setup, y) # Final model evaluation
   return(list(beta = final_results$beta, theta = final_theta, neg_log_likelihood = final_results$nll))
 }
+
+
+
